@@ -5,3 +5,5 @@ target/
 dist/
 .idea/
 .claude/
+.codex
+.codex/

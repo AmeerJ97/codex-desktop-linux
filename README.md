@@ -4,7 +4,13 @@ Run [OpenAI Codex Desktop](https://openai.com/codex/) on Linux.
 
 The official Codex Desktop app is macOS-only. This project converts the upstream macOS `Codex.dmg` into a runnable Linux Electron app, packages it as `.deb`, `.rpm`, or pacman artifacts, and includes a local updater that rebuilds future Linux packages from newer upstream DMGs.
 
-`codex-update-manager` current crate version: `0.4.2`
+`codex-update-manager` current crate version: `0.4.3`
+
+## Project Lineage
+
+This codebase is based on the community Linux port at [ilysenko/codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux) and keeps that project's MIT license, contributor credit, and upstream history visible. Codex Desktop remains an OpenAI product; this repository is an unofficial conversion, packaging, and updater workflow for users who provide their own upstream DMG.
+
+Downstream canonical forks should keep this attribution intact and route broadly useful Linux fixes back upstream when practical.
 
 SemVer policy for the crate:
 
@@ -354,6 +360,7 @@ make clean-state
 ```
 
 `make package` auto-detects the native package manager available on the host and builds the matching package type (Debian, RPM, or pacman). `make install` does the same for the latest built native package.
+
 ## How It Works
 
 The build and update flow is:
@@ -363,7 +370,7 @@ The build and update flow is:
 3. it rebuilds native Node modules for Linux
 4. it downloads a Linux Electron runtime
 5. it writes the Linux launcher into `codex-app/start.sh`
-6. `scripts/build-deb.sh` or `scripts/build-rpm.sh` packages `codex-app/`
+6. `scripts/build-deb.sh`, `scripts/build-rpm.sh`, or `scripts/build-pacman.sh` packages `codex-app/`
 7. the installed package provides `codex-update-manager` plus `codex-update-manager.service`
 8. the updater checks for newer upstream DMGs and rebuilds future Linux package updates locally
 
@@ -421,6 +428,8 @@ The installer replaces the macOS Electron with a Linux build and recompiles the 
 The extracted app expects a local webview origin on `127.0.0.1:5175`, so the launcher starts `python3 -m http.server 5175 --bind 127.0.0.1` from `content/webview/`, waits for the socket to become reachable, and only then launches Electron. The launcher tracks the owned webview server PID under XDG state, rediscovers an orphaned server from the same `content/webview/` directory, and reuses an already verified server instead of killing every process that matches the port.
 The launcher also verifies that `http://127.0.0.1:5175/index.html` contains the expected Codex startup markers before cold-starting Electron, so a port collision or incomplete extracted webview fails fast in `launcher.log` instead of hanging on the splash screen. If an existing Electron process is detected, the launcher uses a warm-start handoff path and lets the app's single-instance handler focus the running window.
 
+GPU compositing stays conservative by default. Set `CODEX_GPU_MODE=auto` to allow GPU compositing, `CODEX_GPU_MODE=nvidia` to also set NVIDIA PRIME render-offload variables, or `CODEX_GPU_MODE=off` to pass `--disable-gpu`.
+
 Native-package-only launcher behavior such as desktop-entry hints, `codex-update-manager` session bootstrapping, and the background launch-time update check lives in `packaging/linux/codex-packaged-runtime.sh`, which the generated launcher loads only when present inside a packaged install.
 
 The current evaluation for a future Rust replacement for the local webview server lives in `docs/webview-server-evaluation.md`.
@@ -436,7 +445,8 @@ The current evaluation for a future Rust replacement for the local webview serve
 | `CODEX_CLI_PATH` error | Install the CLI with `npm i -g @openai/codex` or `npm i -g --prefix ~/.local @openai/codex` |
 | Electron hangs while the CLI is outdated | Re-run the launcher and check `~/.cache/codex-desktop/launcher.log` plus `~/.local/state/codex-update-manager/service.log`; the launcher now runs a best-effort CLI preflight and warns if the automatic refresh fails |
 | GPU/Vulkan/Wayland errors | The launcher sets `--ozone-platform-hint=auto`, `--disable-gpu-sandbox`, `--disable-gpu-compositing`, and `--enable-features=WaylandWindowDecorations` by default. If you need X11 explicitly, try `./codex-app/start.sh --ozone-platform=x11` |
-| Window flickering | GPU compositing is now disabled by default (`--disable-gpu-compositing`). If flickering persists, try `./codex-app/start.sh --disable-gpu` to fully disable GPU acceleration |
+| High CPU temperature or suspected software compositing | Try `CODEX_GPU_MODE=auto ./codex-app/start.sh`. On NVIDIA PRIME/offload systems, try `CODEX_GPU_MODE=nvidia ./codex-app/start.sh` and inspect `~/.cache/codex-desktop/launcher.log` for `nvidia-smi`, `glxinfo -B`, and selected Electron flags |
+| Window flickering | GPU compositing is disabled by default through `CODEX_GPU_MODE=conservative`. If flickering persists, try `CODEX_GPU_MODE=off ./codex-app/start.sh` to fully disable GPU acceleration |
 | Sandbox errors | The launcher already sets `--no-sandbox` |
 | Stale install / cached DMG | Run `./install.sh --fresh` to remove the existing install dir and re-download the DMG |
 | Usage help | Run `./install.sh --help` or `./codex-app/start.sh --help` |
@@ -450,6 +460,7 @@ After changing installer, packaging, or updater logic, validate at least:
 bash -n install.sh scripts/build-deb.sh scripts/build-rpm.sh scripts/build-pacman.sh scripts/install-deps.sh
 cargo check -p codex-update-manager
 cargo test -p codex-update-manager
+node --test scripts/patch-linux-window-ui.test.js
 make package
 ```
 

@@ -77,9 +77,9 @@ Do not assume `codex-app/` is pristine. If behavior differs from `install.sh`, p
 - DMG extraction:
   `7z` can return a non-zero status for the `/Applications` symlink inside the DMG. This is currently treated as a warning if a `.app` bundle was still extracted successfully.
 - Launcher and `nvm`:
-  GUI launchers often do not inherit the user's shell `PATH`. The generated `start.sh` explicitly searches for `codex`, including common `nvm` locations.
+  GUI launchers often do not inherit the user's shell `PATH`. The generated `start.sh` explicitly searches for `codex`, including common `nvm`, `~/.npm-global`, pnpm, and user-local locations before falling back to system paths.
 - CLI preflight:
-  Before Electron launches, the generated launcher asks `codex-update-manager` to verify the installed Codex CLI, install it automatically if it is missing, and update it if the npm package is newer. The check is best-effort: it uses a 1-hour cooldown for npm registry lookups, falls back to `npm install -g --prefix ~/.local` if a global install fails, and warns instead of blocking app launch when the refresh attempt does not succeed.
+  Before Electron launches, the generated launcher resolves a usable Codex CLI path. If the CLI is missing and the launcher was started from an interactive terminal, it prompts before attempting installation. The updater CLI preflight runs in the background by default, uses a 1-hour cooldown for npm registry lookups, falls back to `npm install -g --prefix ~/.local` if a global install fails, and warns instead of blocking app launch when the refresh attempt does not succeed.
 - Linux file manager integration:
   During ASAR patching, `scripts/patch-linux-window-ui.js` also tries to inject a Linux implementation for `Open in File Manager`. The patch is intentionally fail-soft: if the upstream minified bundle no longer matches, the install continues and emits exactly `Failed to apply Linux File Manager Patch`.
 - Linux translucent sidebar default:
@@ -92,9 +92,9 @@ Do not assume `codex-app/` is pristine. If behavior differs from `install.sh`, p
 - Desktop icon association:
   The launcher runs Electron with `--class=codex-desktop`, and the desktop file sets `StartupWMClass=codex-desktop` so the taskbar/dock can associate the correct icon.
 - Webview server:
-  The launcher starts a local `python3 -m http.server 5175` from `content/webview/`, waits for port `5175` to become reachable, verifies that `http://127.0.0.1:5175/index.html` serves the expected Codex startup markers, and only then launches Electron because the extracted app expects local webview assets there.
+  The launcher starts a local `python3 -m http.server 5175 --bind 127.0.0.1` from `content/webview/`, waits for port `5175` to become reachable, verifies that `http://127.0.0.1:5175/index.html` serves the expected Codex startup markers, and only then launches Electron because the extracted app expects local webview assets there. It tracks and reuses its owned webview server and uses a warm-start handoff when Electron is already running.
 - Wayland/GPU compatibility:
-  The generated launcher enables `--ozone-platform-hint=auto`, `--disable-gpu-sandbox`, and `--enable-features=WaylandWindowDecorations` by default. Keep these in mind when debugging Pop!_OS, Wayland, or Nvidia-specific rendering issues.
+  The generated launcher enables `--ozone-platform-hint=auto`, `--disable-gpu-sandbox`, `--disable-gpu-compositing`, and `--enable-features=WaylandWindowDecorations` in the default `CODEX_GPU_MODE=conservative` mode. `CODEX_GPU_MODE=auto` allows GPU compositing, `CODEX_GPU_MODE=nvidia` also exports NVIDIA PRIME render-offload variables, and `CODEX_GPU_MODE=off` passes `--disable-gpu`. Keep these in mind when debugging Pop!_OS, Wayland, or Nvidia-specific rendering issues.
 - Webview server roadmap:
   Review `docs/webview-server-evaluation.md` before changing the local server model; that document captures the current recommendation, risks, and acceptance criteria.
 - Closing behavior:
@@ -112,7 +112,7 @@ Do not assume `codex-app/` is pristine. If behavior differs from `install.sh`, p
 
 ## Crate Versioning
 
-- Current updater crate version: `0.4.2`
+- Current updater crate version: `0.4.3`
 - Bump `patch` for fixes, docs, and maintenance-only updates.
 - Bump `minor` for compatible feature additions.
 - Bump `major` for incompatible CLI, persisted-state, or install-flow changes.

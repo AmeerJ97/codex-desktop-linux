@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.3] - 2026-04-28
+
+### Added
+
+- Launcher `CODEX_GPU_MODE` support with `conservative`, `auto`, `nvidia`, and `off` modes for troubleshooting Wayland, NVIDIA, and software-compositing behavior.
+- Node test coverage for Linux window UI patching behavior.
+
+### Changed
+
+- The installer now detects the Electron version from the upstream app bundle when available and keeps the generated Linux runtime aligned with that version.
+- The launcher now records clearer GPU diagnostics, supports `CODEX_GPU_MODE`, and only passes an explicit CLI path to the updater when the user supplied `CODEX_CLI_PATH`.
+- The RPM builder now uses the shared native-packaging launcher helper instead of duplicating package stub logic.
+
+### Fixed
+
+- Prefer user-local Codex CLI installs such as `~/.npm-global/bin/codex` before stale system-wide CLI binaries when a GUI launcher has a reduced `PATH`.
+- Clean stale macOS, Windows, and intermediate native-module artifacts before rebuilding `node-pty` for Linux.
+- Make Linux ASAR UI patches apply independently, so missing icon assets no longer prevent non-icon Linux patches from being applied.
+- Validate executable permissions before using updater builder scripts, Node toolchain binaries, and resolved Codex CLI candidates.
+
 ## [0.4.2] - 2026-04-23
 
 ### Changed

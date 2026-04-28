@@ -2,6 +2,8 @@
 
 Thanks to everyone who has contributed to codex-desktop-linux!
 
+This fork preserves credit to the original [ilysenko/codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux) project, its contributors, and its MIT license. Downstream canonical copies should keep this attribution visible.
+
 ## Core Contributors
 
 - [@ilysenko](https://github.com/ilysenko)

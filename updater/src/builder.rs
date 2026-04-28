@@ -6,6 +6,8 @@ use crate::{
     state::{ArtifactPaths, PersistedState, UpdateStatus},
 };
 use anyhow::{Context, Result};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     ffi::OsString,
     fs,
@@ -65,6 +67,10 @@ pub async fn build_update(
     state.save(&paths.state_file)?;
 
     copy_builder_bundle(&config.builder_bundle_root, &workspace.bundle_dir)?;
+    ensure_executable(
+        &workspace.bundle_dir.join("install.sh"),
+        "builder install script",
+    )?;
 
     state.status = UpdateStatus::PatchingApp;
     state.save(&paths.state_file)?;
@@ -83,6 +89,7 @@ pub async fn build_update(
     state.save(&paths.state_file)?;
 
     let build_script = package_build_script(&workspace.bundle_dir);
+    ensure_executable(&build_script, "native package build script")?;
     run_and_log(
         Command::new(&build_script)
             .env("PACKAGE_VERSION", candidate_version)
@@ -329,7 +336,28 @@ fn collect_nvm_bin_dirs(nvm_root: &Path) -> Vec<PathBuf> {
 fn is_node_toolchain_dir(path: &Path) -> bool {
     ["node", "npm", "npx"]
         .into_iter()
-        .all(|binary| path.join(binary).is_file())
+        .all(|binary| is_executable(&path.join(binary)))
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn ensure_executable(path: &Path, label: &str) -> Result<()> {
+    if is_executable(path) {
+        return Ok(());
+    }
+
+    anyhow::bail!("{label} is missing or not executable: {}", path.display())
 }
 
 async fn run_and_log(command: &mut Command, log_path: &Path) -> Result<()> {
@@ -403,6 +431,16 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
         Ok(())
     }
 
+    fn write_executable_file(path: &Path, contents: &[u8]) -> Result<()> {
+        fs::write(path, contents)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn builds_update_with_fake_bundle() -> Result<()> {
         let temp = tempdir()?;
@@ -429,23 +467,15 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
             bundle_root.join("packaging/linux/codex-update-manager.service"),
             "[Unit]\nDescription=Codex Update Manager\n",
         )?;
-        fs::write(
-            bundle_root.join("install.sh"),
-            r#"#!/bin/bash
+        write_executable_file(
+            &bundle_root.join("install.sh"),
+            br#"#!/bin/bash
 set -euo pipefail
 mkdir -p "${CODEX_INSTALL_DIR}"
 echo launcher > "${CODEX_INSTALL_DIR}/start.sh"
 chmod +x "${CODEX_INSTALL_DIR}/start.sh"
 "#,
         )?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(
-                bundle_root.join("install.sh"),
-                fs::Permissions::from_mode(0o755),
-            )?;
-        }
 
         write_fake_build_script(
             &bundle_root.join("scripts/build-deb.sh"),
@@ -587,13 +617,25 @@ chmod +x "${CODEX_INSTALL_DIR}/start.sh"
         fs::create_dir_all(&version_bin)?;
         for dir in [&current_bin, &version_bin] {
             for binary in ["node", "npm", "npx"] {
-                fs::write(dir.join(binary), b"bin")?;
+                write_executable_file(&dir.join(binary), b"bin")?;
             }
         }
 
         let directories = collect_nvm_bin_dirs(&nvm_root);
         assert_eq!(directories.first(), Some(&current_bin));
         assert!(directories.contains(&version_bin));
+        Ok(())
+    }
+
+    #[test]
+    fn executable_check_requires_execute_permission() -> Result<()> {
+        let temp = tempdir()?;
+        let script = temp.path().join("script.sh");
+        fs::write(&script, b"#!/bin/sh\n")?;
+
+        assert!(!is_executable(&script));
+        write_executable_file(&script, b"#!/bin/sh\n")?;
+        assert!(is_executable(&script));
         Ok(())
     }
 }
