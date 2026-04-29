@@ -78,6 +78,7 @@ main() {
     stage_update_builder_bundle "$staging_root"
 
     write_launcher_stub "$staging_root"
+    normalize_package_permissions "$staging_root"
 
     local spec_file="$build_root/codex-desktop.spec"
     sed \

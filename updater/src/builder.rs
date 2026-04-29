@@ -12,9 +12,10 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 use tokio::process::Command;
-use tracing::info;
+use tracing::{info, warn};
 
 const REQUIRED_BUNDLE_FILES: [(&str, &str); 6] = [
     ("install.sh", "install.sh"),
@@ -43,6 +44,7 @@ const PACMAN_PACKAGE_SUFFIXES: &[&str] = &[
     ".pkg.tar.lz4",
     ".pkg.tar.lz5",
 ];
+const MAX_RETAINED_WORKSPACES: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Paths to the temporary workspace and generated package produced by a rebuild.
@@ -118,6 +120,13 @@ pub async fn build_update(
     };
     state.save(&paths.state_file)?;
     info!(candidate_version, package = %package_path.display(), "local update build ready");
+    if let Err(error) = prune_old_workspaces(
+        &config.workspace_root,
+        &workspace.workspace_dir,
+        MAX_RETAINED_WORKSPACES,
+    ) {
+        warn!(?error, "failed to prune old updater workspaces");
+    }
 
     Ok(BuildArtifacts {
         workspace_dir: workspace.workspace_dir,
@@ -269,6 +278,56 @@ fn find_package_in(dist_dir: &Path) -> Result<PathBuf> {
         "No native package (.deb, .rpm, or .pkg.tar.*) found in {}",
         dist_dir.display()
     )
+}
+
+fn prune_old_workspaces(
+    workspace_root: &Path,
+    keep_workspace: &Path,
+    max_retained: usize,
+) -> Result<()> {
+    if max_retained == 0 {
+        return Ok(());
+    }
+
+    let workspaces_dir = workspace_root.join("workspaces");
+    if !workspaces_dir.exists() {
+        return Ok(());
+    }
+
+    let keep_workspace = keep_workspace
+        .canonicalize()
+        .unwrap_or_else(|_| keep_workspace.to_path_buf());
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&workspaces_dir)
+        .with_context(|| format!("Failed to read {}", workspaces_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+
+        let path = entry.path();
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if canonical_path == keep_workspace {
+            continue;
+        }
+
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        candidates.push((modified, path));
+    }
+
+    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, path) in candidates.into_iter().skip(max_retained.saturating_sub(1)) {
+        fs::remove_dir_all(&path).with_context(|| {
+            format!("Failed to remove old updater workspace {}", path.display())
+        })?;
+        info!(workspace = %path.display(), "removed old updater workspace");
+    }
+
+    Ok(())
 }
 
 fn is_native_package_file(path: &Path) -> bool {
@@ -590,6 +649,50 @@ chmod +x "${CODEX_INSTALL_DIR}/start.sh"
         assert!(error
             .to_string()
             .contains("No native package (.deb, .rpm, or .pkg.tar.*)"));
+        Ok(())
+    }
+
+    #[test]
+    fn prunes_old_workspaces_but_keeps_current() -> Result<()> {
+        let temp = tempdir()?;
+        let workspace_root = temp.path().join("cache");
+        let workspaces_dir = workspace_root.join("workspaces");
+        let current = workspaces_dir.join("current");
+        let old_a = workspaces_dir.join("old-a");
+        let old_b = workspaces_dir.join("old-b");
+
+        for workspace in [&current, &old_a, &old_b] {
+            fs::create_dir_all(workspace)?;
+            fs::write(workspace.join("marker"), b"workspace")?;
+        }
+
+        prune_old_workspaces(&workspace_root, &current, 1)?;
+
+        assert!(current.exists());
+        assert!(!old_a.exists());
+        assert!(!old_b.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_pruning_retains_only_configured_count() -> Result<()> {
+        let temp = tempdir()?;
+        let workspace_root = temp.path().join("cache");
+        let workspaces_dir = workspace_root.join("workspaces");
+        let current = workspaces_dir.join("current");
+        let old_a = workspaces_dir.join("old-a");
+        let old_b = workspaces_dir.join("old-b");
+
+        for workspace in [&current, &old_a, &old_b] {
+            fs::create_dir_all(workspace)?;
+            fs::write(workspace.join("marker"), b"workspace")?;
+        }
+
+        prune_old_workspaces(&workspace_root, &current, 2)?;
+
+        let retained_count = fs::read_dir(&workspaces_dir)?.count();
+        assert_eq!(retained_count, 2);
+        assert!(current.exists());
         Ok(())
     }
 

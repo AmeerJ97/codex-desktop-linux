@@ -14,7 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - The installer now detects the Electron version from the upstream app bundle when available and keeps the generated Linux runtime aligned with that version.
 - The launcher now records clearer GPU diagnostics, supports `CODEX_GPU_MODE`, and only passes an explicit CLI path to the updater when the user supplied `CODEX_CLI_PATH`.
+- The packaged launcher now leaves stale update checks to the already-running user daemon instead of starting a duplicate launch-time `check-now` unit.
 - The RPM builder now uses the shared native-packaging launcher helper instead of duplicating package stub logic.
+- Native package builders and post-install hooks now normalize installed payload permissions after staging generated app files.
 
 ### Fixed
 
@@ -22,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Clean stale macOS, Windows, and intermediate native-module artifacts before rebuilding `node-pty` for Linux.
 - Make Linux ASAR UI patches apply independently, so missing icon assets no longer prevent non-icon Linux patches from being applied.
 - Validate executable permissions before using updater builder scripts, Node toolchain binaries, and resolved Codex CLI candidates.
+- Bound privileged updater installs with a timeout and prune stale rebuild workspaces after a successful local package build.
 
 ## [0.4.2] - 2026-04-23
 
